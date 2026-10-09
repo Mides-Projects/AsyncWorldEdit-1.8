@@ -266,6 +266,7 @@ public class AsyncWorldEditBukkit extends AsyncWorldEditMain implements ILogger 
         m_loader = loader;
 
         log("Enabled");
+        log("Fork of AsyncWorldEdit by SBPrime, fixed and adapted to work on MC 1.8 with JDK 25 by Gregoret (Kohi).");
     }
 
     @Override
