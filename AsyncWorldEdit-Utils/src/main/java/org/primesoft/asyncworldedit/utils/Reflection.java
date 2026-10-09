@@ -64,6 +64,27 @@ import static org.primesoft.asyncworldedit.LoggerProvider.log;
  */
 public class Reflection {
 
+    /**
+     * JDK 8 had {@code Field.modifiers} accessible. On JDK 12+ / 16+ (strong
+     * encapsulation, e.g. JDK 25) opening {@code java.lang.reflect} requires
+     * {@code --add-opens}. Returns null when unavailable so callers can skip
+     * the FINAL-removal hack and still use plain setAccessible for
+     * non-final fields (the common Bukkit/NMS case on MC 1.8.8).
+     */
+    private static Field getModifiersField() {
+        try {
+            Field f = Field.class.getDeclaredField("modifiers");
+            try {
+                f.setAccessible(true);
+            } catch (RuntimeException ignored) {
+                return null;
+            }
+            return f;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     public static Class<?> classFromName(String p, String name, String message) {
         final String pattern = "%s.%s";
         try {
@@ -79,34 +100,39 @@ public class Reflection {
             Constructor<?> ctor, String message, Object... args) {
         try {
             ctor.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            boolean accessible = modifiersField.isAccessible();
-            if (!accessible) {
+            boolean accessible = modifiersField != null && modifiersField.isAccessible();
+            if (modifiersField != null && !accessible) {
                 modifiersField.setAccessible(true);
             }
 
             try {
                 return resultClass.cast(ctor.newInstance(args));
             } finally {
-                if (!accessible) {
+                if (modifiersField != null && !accessible) {
                     modifiersField.setAccessible(false);
                 }
             }
         } catch (InstantiationException ex) {
             log(String.format("%1$s: unsupported version.", message));
+            ExceptionHelper.printException(ex, message);
         } catch (InvocationTargetException ex) {
             log(String.format("%1$s: unsupported version.", message));
+            Throwable cause = ex.getCause();
+            ExceptionHelper.printException(cause != null ? cause : ex, message);
         } catch (IllegalArgumentException ex) {
             log(String.format("%1$s: unsupported version.", message));
+            ExceptionHelper.printException(ex, message);
         } catch (IllegalAccessException ex) {
             log(String.format("%1$s: security exception.", message));
-        } catch (NoSuchFieldException ex) {
-            log(String.format("%1$s: unsupported version.", message));
+            ExceptionHelper.printException(ex, message);
         } catch (SecurityException ex) {
             log(String.format("%1$s: security exception.", message));
+            ExceptionHelper.printException(ex, message);
         } catch (ClassCastException ex) {
             log(String.format("%1$s: unsupported version, unable to cast result.", message));
+            ExceptionHelper.printException(ex, message);
         }
 
         return null;
@@ -116,17 +142,17 @@ public class Reflection {
             Method method, String message, Object... args) {
         try {
             method.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            boolean accessible = modifiersField.isAccessible();
-            if (!accessible) {
+            boolean accessible = modifiersField != null && modifiersField.isAccessible();
+            if (modifiersField != null && !accessible) {
                 modifiersField.setAccessible(true);
             }
 
             try {
                 return resultClass.cast(method.invoke(instance, args));
             } finally {
-                if (!accessible) {
+                if (modifiersField != null && !accessible) {
                     modifiersField.setAccessible(false);
                 }
             }
@@ -136,8 +162,6 @@ public class Reflection {
             log(String.format("%1$s: unsupported version.", message));
         } catch (IllegalAccessException ex) {
             log(String.format("%1$s: security exception.", message));
-        } catch (NoSuchFieldException ex) {
-            log(String.format("%1$s: unsupported version.", message));
         } catch (SecurityException ex) {
             log(String.format("%1$s: security exception.", message));
         } catch (ClassCastException ex) {
@@ -151,10 +175,10 @@ public class Reflection {
             Method method, String message, Object... args) {
         try {
             method.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            boolean accessible = modifiersField.isAccessible();
-            if (!accessible) {
+            boolean accessible = modifiersField != null && modifiersField.isAccessible();
+            if (modifiersField != null && !accessible) {
                 modifiersField.setAccessible(true);
             }
 
@@ -162,7 +186,7 @@ public class Reflection {
                 method.invoke(instance, args);
                 return true;
             } finally {
-                if (!accessible) {
+                if (modifiersField != null && !accessible) {
                     modifiersField.setAccessible(false);
                 }
             }
@@ -172,8 +196,6 @@ public class Reflection {
             log(String.format("%1$s: unsupported version.", message));
         } catch (IllegalAccessException ex) {
             log(String.format("%1$s: security exception.", message));
-        } catch (NoSuchFieldException ex) {
-            log(String.format("%1$s: unsupported version.", message));
         } catch (SecurityException ex) {
             log(String.format("%1$s: security exception.", message));
         } catch (ClassCastException ex) {
@@ -186,17 +208,17 @@ public class Reflection {
     public static <T> T get(Object instance, Class<T> fieldClass, Field field, String message) {
         try {
             field.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            boolean accessible = modifiersField.isAccessible();
-            if (!accessible) {
+            boolean accessible = modifiersField != null && modifiersField.isAccessible();
+            if (modifiersField != null && !accessible) {
                 modifiersField.setAccessible(true);
             }
 
             try {
                 return fieldClass.cast(field.get(instance));
             } finally {
-                if (!accessible) {
+                if (modifiersField != null && !accessible) {
                     modifiersField.setAccessible(false);
                 }
             }
@@ -204,8 +226,6 @@ public class Reflection {
             log(String.format("%1$s: unsupported version.", message));
         } catch (IllegalAccessException ex) {
             log(String.format("%1$s: security exception.", message));
-        } catch (NoSuchFieldException ex) {
-            log(String.format("%1$s: unsupported version.", message));
         } catch (SecurityException ex) {
             log(String.format("%1$s: security exception.", message));
         } catch (ClassCastException ex) {
@@ -218,17 +238,17 @@ public class Reflection {
     public static Object get(Object instance, Field field, String message) {
         try {
             field.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            boolean accessible = modifiersField.isAccessible();
-            if (!accessible) {
+            boolean accessible = modifiersField != null && modifiersField.isAccessible();
+            if (modifiersField != null && !accessible) {
                 modifiersField.setAccessible(true);
             }
 
             try {
                 return field.get(instance);
             } finally {
-                if (!accessible) {
+                if (modifiersField != null && !accessible) {
                     modifiersField.setAccessible(false);
                 }
             }
@@ -236,8 +256,6 @@ public class Reflection {
             log(String.format("%1$s: unsupported version.", message));
         } catch (IllegalAccessException ex) {
             log(String.format("%1$s: security exception.", message));
-        } catch (NoSuchFieldException ex) {
-            log(String.format("%1$s: unsupported version.", message));
         } catch (SecurityException ex) {
             log(String.format("%1$s: security exception.", message));
         } catch (ClassCastException ex) {
@@ -263,17 +281,17 @@ public class Reflection {
         try {
             Field field = sourceClass.getDeclaredField(fieldName);
             field.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            boolean accessible = modifiersField.isAccessible();
-            if (!accessible) {
+            boolean accessible = modifiersField != null && modifiersField.isAccessible();
+            if (modifiersField != null && !accessible) {
                 modifiersField.setAccessible(true);
             }
 
             try {
                 return fieldClass.cast(field.get(instance));
             } finally {
-                if (!accessible) {
+                if (modifiersField != null && !accessible) {
                     modifiersField.setAccessible(false);
                 }
             }
@@ -310,22 +328,24 @@ public class Reflection {
             boolean accessible = field.isAccessible();
 
             //field.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            int modifiers = modifiersField.getModifiers();
+            int modifiers = modifiersField != null
+                    ? modifiersField.getModifiers()
+                    : field.getModifiers();
             boolean isFinal = (modifiers & Modifier.FINAL) == Modifier.FINAL;
 
             if (!accessible) {
                 field.setAccessible(true);
             }
-            if (isFinal) {
+            if (isFinal && modifiersField != null) {
                 modifiersField.setAccessible(true);
                 modifiersField.setInt(field, modifiers & ~Modifier.FINAL);
             }
             try {
                 field.set(instance, value);
             } finally {
-                if (isFinal) {
+                if (isFinal && modifiersField != null) {
                     modifiersField.setInt(field, modifiers | Modifier.FINAL);
                 }
                 if (!accessible) {
@@ -349,15 +369,17 @@ public class Reflection {
             boolean accessible = field.isAccessible();
 
             //field.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = getModifiersField();
 
-            int modifiers = modifiersField.getModifiers();
+            int modifiers = modifiersField != null
+                    ? modifiersField.getModifiers()
+                    : field.getModifiers();
             boolean isFinal = (modifiers & Modifier.FINAL) == Modifier.FINAL;
 
             if (!accessible) {
                 field.setAccessible(true);
             }
-            if (isFinal) {
+            if (isFinal && modifiersField != null) {
                 modifiersField.setAccessible(true);
                 modifiersField.setInt(field, modifiers & ~Modifier.FINAL);
             }
@@ -365,7 +387,7 @@ public class Reflection {
                 field.set(instance, value);
                 return true;
             } finally {
-                if (isFinal) {
+                if (isFinal && modifiersField != null) {
                     modifiersField.setInt(field, modifiers | Modifier.FINAL);
                 }
                 if (!accessible) {
@@ -376,8 +398,6 @@ public class Reflection {
             log(String.format("%1$s: unsupported version.", message));
         } catch (IllegalAccessException ex) {
             log(String.format("%1$s: security exception.", message));
-        } catch (NoSuchFieldException ex) {
-            log(String.format("%1$s: unsupported version, field modifiers not found.", message));
         } catch (SecurityException ex) {
             log(String.format("%1$s: security exception.", message));
         }

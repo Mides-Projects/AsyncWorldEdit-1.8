@@ -191,12 +191,18 @@ public abstract class Loader extends ClassLoader implements ILibraryLoader {
     
     @Override
     protected synchronized Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-        Class<?> cls = findLoadedClass(m_classLoader, name);
-
-        if (cls != null) {
-            return cls;
+        // JDK classes must never be (re)defined by this loader: defining
+        // java.* is prohibited (SecurityException: Prohibited package name)
+        // and on Java 9+ the boot classes are even visible to plain resource
+        // lookups (jrt:/). Delegate straight to the parent.
+        if (name != null && (name.startsWith("java.") || name.startsWith("jdk."))) {
+            return super.loadClass(name, resolve);
         }
 
+        Class<?> cls = null;
+
+        // Classes already defined by this loader (in-memory libraries and
+        // our own previously defined classes).
         if (m_classHash.containsKey(name)) {
             return m_classHash.get(name);
         }
@@ -204,9 +210,31 @@ public abstract class Loader extends ClassLoader implements ILibraryLoader {
         String fileName = String.format("%1$s.class", name.replace('.', '/'));
 
         try {
+            // In-memory libraries first: the adapter and injector shadows live
+            // only here (nested jars), the parent can never provide them.
             cls = loadFromLibrary(name, fileName);
             if (cls != null) {
                 return cls;
+            }
+
+            // Parent/global next: everything the parent can provide (including
+            // our own fat-jar classes) must come from there. Defining a local
+            // duplicate creates a parallel universe and cross-loader casts
+            // (e.g. BukkitAsyncWorldEditCore to IAsyncWorldEditCore) fail with
+            // ClassCastException. super.loadClass also performs the
+            // already-loaded check internally, so no reflective probe needed.
+            try {
+                cls = super.loadClass(name, resolve);
+                return cls;
+            } catch (ClassNotFoundException ex) {
+                // Not visible to the parent: fall through to local define.
+                cls = null;
+            }
+
+            // Local define is only meaningful for our own namespace; anything
+            // else should have resolved above.
+            if (name == null || !name.startsWith("org.primesoft.asyncworldedit.")) {
+                throw new ClassNotFoundException(name);
             }
 
             InputStream is = getResourceStream(fileName);
@@ -287,6 +315,12 @@ public abstract class Loader extends ClassLoader implements ILibraryLoader {
                     return null;
                 } catch (BadPaddingException ex) {
                     return null;
+                } catch (RuntimeException ex) {
+                    // Community/JDK25 build: no license key material (the key
+                    // derivation placeholders cannot produce a valid key).
+                    // Leave m_key null so the class bytes below are defined
+                    // plain; the AES init failure is already ignored by the
+                    // catches that follow.
                 }
 
                 key = m_key;
@@ -401,12 +435,37 @@ public abstract class Loader extends ClassLoader implements ILibraryLoader {
                 return false;
             }
 
-            if (!injectClass(new File(pluginFolder, PLUGIN_INJECTOR_JAR))) {
-                log("ERROR: Unable to load the injector");
-                return false;
+            boolean injected;
+            try {
+                injected = injectClass(new File(pluginFolder, PLUGIN_INJECTOR_JAR));
+            } catch (RuntimeException ex) {
+                // Java 16+ strong encapsulation: URLClassLoader.addURL reflection
+                // throws InaccessibleObjectException (module java.base does not
+                // open java.net). Fall through to the in-loader fallback below.
+                // NOTE: for the full classloader-shadowing behavior the server
+                // should be started with:
+                //   --add-opens java.base/java.net=ALL-UNNAMED
+                log("Standard injector injection unavailable (no --add-opens java.base/java.net=ALL-UNNAMED?), using in-loader fallback...");
+                injected = false;
             }
 
-            new InjectorManual().onEnable();
+            if (!injected) {
+                // Fallback for modern Java: load the injector from our own
+                // resources straight into this loader (ClassLoader.defineClass
+                // needs no --add-opens) and enable it without static references
+                // (the plugin class loader cannot see the nested jar).
+                if (!loadLibrary(PLUGIN_INJECTOR_JAR)) {
+                    log("ERROR: Unable to load the injector");
+                    return false;
+                }
+
+                if (!enableInjectorManual()) {
+                    log("ERROR: Unable to enable the injector");
+                    return false;
+                }
+            } else {
+                new InjectorManual().onEnable();
+            }
         }
 
         File installed = new File(dataFolder, INSTALLED);
@@ -467,68 +526,47 @@ public abstract class Loader extends ClassLoader implements ILibraryLoader {
     }
 
     private InputStream getResourceStream(final String fileName) {
-        byte[] xor = m_seed;
-
-        if (xor == null) {
-            String seed = "Name seed 1"
-                    + "Name seed 2";
-            String part1 = seed.substring(0, seed.length() / 2);
-            String part2 = seed.substring(seed.length() / 2, seed.indexOf('='));
-            int part1l = part1.length();
-            int part2l = part2.length();
-
-            if (part1l < 5 || part2l < 5) {
-                return null;
-            }
-            
-            boolean hasMatch = true;
-            int iMatch = 0;
-            int iSkip = 0;
-
-            for (int match = 1; match < part2l && hasMatch; match++) {
-                final String toMatch = part2.substring(part2l - match);
-
-                hasMatch = false;
-                for (int skip = iSkip; skip < part1l - match; skip++) {
-                    final String txt = part1.substring(part1l - match - skip, part1l - skip);
-
-                    if (txt.equals(toMatch)) {
-                        hasMatch = true;
-                        iMatch = match;
-                        iSkip = skip;
-                        break;
-                    }
-                }
-            }
-
-            seed = String.format("%1$s%2$s%3$s",
-                    part1.substring(0, part1l - iSkip - iMatch),
-                    part2.substring(0, part2l - iMatch).replaceFirst(part1.substring(part1l - iSkip), ""),
-                    seed.substring(seed.indexOf('='))
-            );
-            m_seed = Base64.getDecoder().decode(seed);
-            if (m_seed.length < 2) {
-                return null;
-            }
-            xor = m_seed;
+        if (fileName == null) {
+            return null;
         }
 
-        byte[] bFileName = fileName.getBytes(UTF8);
-        for (int i = 0; i < bFileName.length; i++) {
-            bFileName[i] = (byte) (bFileName[i] ^ xor[i % xor.length]);
+        // Community/JDK25 build: resources are stored under plain names.
+        // The original /res obfuscation requires the private JarProcessor and
+        // the seed patches (src/main/patches) which are not redistributable,
+        // so the placeholder seed would crash with
+        // StringIndexOutOfBoundsException here. Absolute lookup from the
+        // classpath root covers nested jars (AsyncWorldEditInjector.jar,
+        // AsyncWorldEdit-spigot_v1_8_R3.jar), LICENSE and .class files.
+        String normalized = fileName.replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (normalized.isEmpty()) {
+            return null;
         }
 
-        StringBuilder sb = new StringBuilder();
-        StringBuilder result = new StringBuilder();
+        return m_thisClass.getResourceAsStream("/" + normalized);
+    }
 
-        result.append("/res");
-        String base64Name = Base64.getEncoder().encodeToString(m_sha.digest(bFileName)).replace('+', '-').replace('/', '_');
-        sb.append(base64Name);
-
-        result.append("/");
-        result.append(sb);
-
-        return m_thisClass.getResourceAsStream(result.toString());
+    /**
+     * Enables the manually loaded injector without referencing its classes
+     * statically (they live in the nested injector jar which the plugin class
+     * loader cannot see when URLClassLoader.addURL reflection is blocked on
+     * modern Java). Resolved through this loader, which defines them from
+     * memory via {@link #loadLibrary(String)}.
+     *
+     * @return true when the injector was enabled
+     */
+    private boolean enableInjectorManual() {
+        try {
+            Class<?> cls = loadClass("org.primesoft.asyncworldedit.injector.InjectorManual");
+            Object manual = cls.getDeclaredConstructor().newInstance();
+            cls.getMethod("onEnable").invoke(manual);
+            return true;
+        } catch (Throwable ex) {
+            log("ERROR: Unable to enable the injector: " + ex.getMessage());
+            return false;
+        }
     }
 
     /**

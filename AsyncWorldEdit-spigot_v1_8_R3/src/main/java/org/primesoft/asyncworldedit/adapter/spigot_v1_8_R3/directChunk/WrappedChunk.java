@@ -520,7 +520,35 @@ public class WrappedChunk extends BaseBukkitWrappedChunk<CraftChunk> {
             for (EntityTrackerEntry trackerEntry : trackerEntries) {
                 trackerEntry.clear(ep);
             }
-            tracker.a(ep, chunk);
+            updateTrackedEntities(tracker, ep, chunk);
+        }
+    }
+
+    /**
+     * Fork-compatible replacement for the vanilla
+     * {@code EntityTracker.a(EntityPlayer, Chunk)} which does not exist on
+     * Minetick/Paper 1.8.8 forks (their {@code EntityTracker} only exposes
+     * {@code a(Entity, Packet)}): re-sends tracked-entity state for the
+     * entities located in this chunk.
+     */
+    private static void updateTrackedEntities(
+            final EntityTracker tracker,
+            final EntityPlayer ep,
+            final Chunk chunk) {
+        if (tracker == null || ep == null || chunk == null) {
+            return;
+        }
+
+        for (EntityTrackerEntry entry : tracker.c) {
+            if (entry == null || entry.tracker == null) {
+                continue;
+            }
+
+            final Entity entity = entry.tracker;
+            if ((((int) entity.locX) >> 4) == chunk.locX
+                    && (((int) entity.locZ) >> 4) == chunk.locZ) {
+                entry.updatePlayer(ep);
+            }
         }
     }
 

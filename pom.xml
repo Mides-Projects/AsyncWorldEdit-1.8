@@ -8,8 +8,33 @@
     <version>3.5.4</version>
     <packaging>pom</packaging>
     <name>AsyncWorldEdit_AllInOne</name>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Build with JDK 25, emit Java 8 bytecode (v52) for MC 1.8.8 / Java 8 runtime -->
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+    </properties>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${maven-compiler-plugin.version}</version>
+                    <configuration>
+                        <source>1.8</source>
+                        <target>1.8</target>
+                        <encoding>UTF-8</encoding>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
     <modules>
-        <module>JarProcessor</module>
+        <!-- NOTE: JarProcessor module does not exist in tag v3.5.4, removed so
+             'mvn package' works. -->
         <module>AsyncWorldEdit</module>
         <module>AsyncWorldEdit-ActionBarAPI</module>
         <module>AsyncWorldEdit-ActionMessager</module>
@@ -33,6 +58,18 @@
         <module>AsyncWorldEdit-spigot_v1_9_R2</module>
         <module>AsyncWorldEdit-TitleManager</module>
         <module>AsyncWorldEdit-Utils</module>
-        <module>AsyncWorldEdit-WelcomeTitle</module>        
+        <module>AsyncWorldEdit-WelcomeTitle</module>
+        <!-- Slim 1.8.8-only distribution, builds with JDK 25 (see module) -->
+        <module>AsyncWorldEdit-Deploy18</module>
     </modules>
+
+    <repositories>
+        <!-- Needed to resolve org.bukkit:bukkit version ranges on modern setups -->
+        <repository>
+            <id>spigotmc-snapshots</id>
+            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
+            <releases><enabled>false</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+    </repositories>
 </project>
